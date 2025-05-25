@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WebRTC P2P Demo</title>
+</head>
+<body>
+  <h2>Local Video</h2>
+  <video id="localVideo" autoplay playsinline muted></video>
+  <h2>Remote Video</h2>
+  <video id="remoteVideo" autoplay playsinline></video>
+
+  <script>
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+
+    const socket = new WebSocket(location.origin.replace(/^http/, 'ws'));
+    const peer = new RTCPeerConnection();
+
+    navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+      .then(stream => {
+        localVideo.srcObject = stream;
+        stream.getTracks().forEach(track => peer.addTrack(track, stream));
+      });
+
+    peer.ontrack = event => {
+      remoteVideo.srcObject = event.streams[0];
+    };
+
+    peer.onicecandidate = event => {
+      if (event.candidate) {
+        socket.send(JSON.stringify({ type: 'ice', candidate: event.candidate }));
+      }
+    };
+
+    socket.onmessage = async (event) => {
+      const data = JSON.parse(event.data);
+
+      if (data.type === 'offer') {
+        await peer.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        socket.send(JSON.stringify({ type: 'answer', answer }));
+      } else if (data.type === 'answer') {
+        await peer.setRemoteDescription(new RTCSessionDescription(data.answer));
+      } else if (data.type === 'ice') {
+        if (data.candidate) {
+          await peer.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+      }
+    };
+
+    socket.onopen = async () => {
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      socket.send(JSON.stringify({ type: 'offer', offer }));
+    };
+  </script>
+</body>
+</html>
